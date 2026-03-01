@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>3D Conway's Game of Life</title>
+    <title>Voxel Arena - Interactive Sandbox</title>
     <style>
       :root {
         color-scheme: dark;
@@ -14,43 +14,165 @@
         margin: 0;
         height: 100%;
         overflow: hidden;
-        background: radial-gradient(circle at top, #101728 0%, #070b12 65%);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: #05070d;
       }
 
-      #app {
+      #app,
+      canvas {
         width: 100%;
         height: 100%;
+        display: block;
       }
 
-      .lil-gui {
-        --background-color: rgba(12, 16, 26, 0.9);
-        --title-background-color: rgba(27, 37, 62, 0.95);
-        --widget-color: #8bb4ff;
-        --text-color: #d9e6ff;
-        --hover-color: #aec8ff;
-        --focus-color: #d1dfff;
+      #hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      #crosshair {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 18px;
+        height: 18px;
+        transform: translate(-50%, -50%);
+      }
+
+      #crosshair::before,
+      #crosshair::after {
+        content: '';
+        position: absolute;
+        background: rgba(255, 255, 255, 0.9);
+      }
+
+      #crosshair::before {
+        left: 8px;
+        top: 0;
+        width: 2px;
+        height: 18px;
+      }
+
+      #crosshair::after {
+        left: 0;
+        top: 8px;
+        width: 18px;
+        height: 2px;
+      }
+
+      .panel {
+        position: absolute;
+        left: 14px;
+        background: rgba(8, 12, 20, 0.74);
+        border: 1px solid rgba(133, 170, 255, 0.3);
+        border-radius: 10px;
+        backdrop-filter: blur(6px);
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        color: #deebff;
+      }
+
+      #instructions {
+        top: 14px;
+        padding: 12px 14px;
+        max-width: 350px;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      #stats {
+        bottom: 16px;
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+
+      #hotbar {
+        position: absolute;
+        left: 50%;
+        bottom: 18px;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 8px;
+      }
+
+      .slot {
+        width: 58px;
+        height: 58px;
+        border: 2px solid rgba(180, 200, 255, 0.38);
+        border-radius: 10px;
+        background: rgba(6, 10, 16, 0.74);
+        display: grid;
+        place-items: center;
+        color: #d3e6ff;
+        font-weight: 700;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+      }
+
+      .slot.active {
+        border-color: #9ed0ff;
+        box-shadow: 0 0 0 2px rgba(158, 208, 255, 0.2), inset 0 0 12px rgba(110, 190, 255, 0.2);
+      }
+
+      #lock-screen {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at center, rgba(13, 20, 34, 0.68), rgba(3, 5, 9, 0.9));
+        color: #eff6ff;
+        text-align: center;
+        padding: 24px;
+        cursor: pointer;
+      }
+
+      #lock-screen.hidden {
+        display: none;
+      }
+
+      #lock-screen h1 {
+        margin: 0 0 10px;
+        font-size: clamp(26px, 4vw, 42px);
+      }
+
+      #lock-screen p {
+        margin: 4px 0;
+        opacity: 0.9;
       }
     </style>
   </head>
   <body>
     <div id="app"></div>
 
+    <div id="hud">
+      <div id="crosshair"></div>
+      <div id="instructions" class="panel">
+        <strong>Voxel Arena Controls</strong><br />
+        Click to lock cursor • WASD move • Shift sprint • Space jump<br />
+        Left click remove block • Right click place block<br />
+        1/2/3 choose block type • F builds a defensive wall
+      </div>
+      <div id="stats" class="panel">Loading...</div>
+      <div id="hotbar"></div>
+    </div>
+
+    <div id="lock-screen">
+      <div>
+        <h1>Voxel Arena</h1>
+        <p>Minecraft-style building + fast movement sandbox.</p>
+        <p><strong>Click anywhere to play</strong></p>
+      </div>
+    </div>
+
     <script type="module">
       import * as THREE from 'https://unpkg.com/three@0.174.0/build/three.module.js';
-      import { OrbitControls } from 'https://unpkg.com/three@0.174.0/examples/jsm/controls/OrbitControls.js';
-      import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.20/+esm';
+      import { PointerLockControls } from 'https://unpkg.com/three@0.174.0/examples/jsm/controls/PointerLockControls.js';
 
       const app = document.getElementById('app');
+      const statsEl = document.getElementById('stats');
+      const hotbarEl = document.getElementById('hotbar');
+      const lockScreen = document.getElementById('lock-screen');
 
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x070b12);
-      scene.fog = new THREE.Fog(0x070b12, 70, 210);
-
-      const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 500);
-      camera.position.set(36, 42, 36);
-
-      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.shadowMap.enabled = true;
@@ -58,316 +180,319 @@
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       app.appendChild(renderer.domElement);
 
-      const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.07;
-      controls.target.set(0, 0, 0);
-      controls.minDistance = 12;
-      controls.maxDistance = 230;
-      controls.maxPolarAngle = Math.PI * 0.49;
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x78b8ff);
+      scene.fog = new THREE.Fog(0x9bc8ff, 48, 180);
 
-      const ambientLight = new THREE.AmbientLight(0x9fb8ff, 0.4);
-      scene.add(ambientLight);
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 250);
+      camera.position.set(0, 18, 0);
 
-      const directionalLight = new THREE.DirectionalLight(0xa8c8ff, 1.25);
-      directionalLight.position.set(22, 34, 20);
-      directionalLight.castShadow = true;
-      directionalLight.shadow.mapSize.set(2048, 2048);
-      directionalLight.shadow.camera.left = -90;
-      directionalLight.shadow.camera.right = 90;
-      directionalLight.shadow.camera.top = 90;
-      directionalLight.shadow.camera.bottom = -90;
-      directionalLight.shadow.camera.near = 0.1;
-      directionalLight.shadow.camera.far = 180;
-      directionalLight.shadow.bias = -0.00008;
-      scene.add(directionalLight);
+      const controls = new PointerLockControls(camera, document.body);
+      scene.add(controls.getObject());
 
-      const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(420, 420),
-        new THREE.MeshStandardMaterial({
-          color: 0x080d18,
-          roughness: 0.9,
-          metalness: 0.08,
-        }),
+      lockScreen.addEventListener('click', () => controls.lock());
+      controls.addEventListener('lock', () => lockScreen.classList.add('hidden'));
+      controls.addEventListener('unlock', () => lockScreen.classList.remove('hidden'));
+
+      const hemi = new THREE.HemisphereLight(0xc9e4ff, 0x45617f, 0.65);
+      scene.add(hemi);
+
+      const sun = new THREE.DirectionalLight(0xffffff, 1.15);
+      sun.position.set(40, 70, 30);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.near = 0.5;
+      sun.shadow.camera.far = 220;
+      sun.shadow.camera.left = -90;
+      sun.shadow.camera.right = 90;
+      sun.shadow.camera.top = 90;
+      sun.shadow.camera.bottom = -90;
+      sun.shadow.bias = -0.00006;
+      scene.add(sun);
+
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(300, 300),
+        new THREE.MeshStandardMaterial({ color: 0x3b6d5a, roughness: 0.94, metalness: 0.03 }),
       );
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.y = -0.001;
-      floor.receiveShadow = true;
-      scene.add(floor);
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -0.01;
+      ground.receiveShadow = true;
+      scene.add(ground);
 
-      const helperGrid = new THREE.GridHelper(180, 60, 0x1f3258, 0x13213b);
-      helperGrid.material.opacity = 0.17;
-      helperGrid.material.transparent = true;
-      scene.add(helperGrid);
+      const blocks = new Map();
+      const blockCatalog = [
+        { name: 'Grass', color: new THREE.Color(0x59a64f) },
+        { name: 'Stone', color: new THREE.Color(0x8b9097) },
+        { name: 'Neon', color: new THREE.Color(0x44d0ff) },
+      ];
 
-      const state = {
-        gridSize: 50,
-        speed: 12,
-        running: false,
-      };
+      const worldSize = 36;
+      const worldHeight = 16;
+      const maxBlocks = 32000;
+      const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+      const cubeMat = new THREE.MeshStandardMaterial({ roughness: 0.86, metalness: 0.04, vertexColors: true });
+      const blockMesh = new THREE.InstancedMesh(cubeGeo, cubeMat, maxBlocks);
+      blockMesh.castShadow = true;
+      blockMesh.receiveShadow = true;
+      blockMesh.frustumCulled = false;
+      scene.add(blockMesh);
 
-      const sim = {
-        size: state.gridSize,
-        current: new Uint8Array(state.gridSize * state.gridSize),
-        next: new Uint8Array(state.gridSize * state.gridSize),
-        scale: new Float32Array(state.gridSize * state.gridSize),
-        left: new Int16Array(state.gridSize),
-        right: new Int16Array(state.gridSize),
-        up: new Int16Array(state.gridSize),
-        down: new Int16Array(state.gridSize),
-      };
+      const matrix = new THREE.Matrix4();
+      const position = new THREE.Vector3();
 
-      const tmpMatrix = new THREE.Matrix4();
-      const tmpPos = new THREE.Vector3();
-      const tmpScale = new THREE.Vector3();
-      const tmpQuat = new THREE.Quaternion();
-      const raycaster = new THREE.Raycaster();
-      const pointer = new THREE.Vector2();
-      const pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const pickPoint = new THREE.Vector3();
+      function keyFor(x, y, z) {
+        return `${x},${y},${z}`;
+      }
 
-      const cellSize = 1;
-      const baseY = 0.5;
-      let boardHalfExtent = (state.gridSize * cellSize) / 2;
-      let cellsMesh;
+      function addBlock(x, y, z, type = 0) {
+        if (y < 0 || y >= worldHeight) return;
+        blocks.set(keyFor(x, y, z), type);
+      }
 
-      function buildWrapTables() {
-        const n = sim.size;
-        for (let i = 0; i < n; i += 1) {
-          sim.left[i] = i === 0 ? n - 1 : i - 1;
-          sim.right[i] = i === n - 1 ? 0 : i + 1;
-          sim.up[i] = i === 0 ? n - 1 : i - 1;
-          sim.down[i] = i === n - 1 ? 0 : i + 1;
+      function removeBlock(x, y, z) {
+        blocks.delete(keyFor(x, y, z));
+      }
+
+      function getBlock(x, y, z) {
+        const t = blocks.get(keyFor(x, y, z));
+        return t === undefined ? null : t;
+      }
+
+      function rebuildMesh() {
+        let i = 0;
+        for (const [key, type] of blocks.entries()) {
+          if (i >= maxBlocks) break;
+          const [x, y, z] = key.split(',').map(Number);
+          position.set(x + 0.5, y + 0.5, z + 0.5);
+          matrix.setPosition(position);
+          blockMesh.setMatrixAt(i, matrix);
+          blockMesh.setColorAt(i, blockCatalog[type].color);
+          i += 1;
         }
+        blockMesh.count = i;
+        blockMesh.instanceMatrix.needsUpdate = true;
+        if (blockMesh.instanceColor) blockMesh.instanceColor.needsUpdate = true;
       }
 
-      function indexAt(x, z) {
-        return z * sim.size + x;
+      function terrainHeight(x, z) {
+        const n = Math.sin(x * 0.23) * 2.1 + Math.cos(z * 0.25) * 2.1 + Math.sin((x + z) * 0.12) * 1.4;
+        return Math.max(2, Math.min(10, Math.floor(6 + n)));
       }
 
-      function randomizeGrid(probability = 0.28) {
-        for (let i = 0; i < sim.current.length; i += 1) {
-          sim.current[i] = Math.random() < probability ? 1 : 0;
-          sim.scale[i] = sim.current[i] ? 1 : 0;
-        }
-        sim.next.fill(0);
-        updateAllMatrices(true);
-      }
-
-      function clearGrid() {
-        sim.current.fill(0);
-        sim.next.fill(0);
-        sim.scale.fill(0);
-        updateAllMatrices(true);
-      }
-
-      function updateLogicStep() {
-        const n = sim.size;
-        const { current, next, left, right, up, down } = sim;
-
-        for (let z = 0; z < n; z += 1) {
-          const zUp = up[z];
-          const zDown = down[z];
-          const row = z * n;
-          const rowUp = zUp * n;
-          const rowDown = zDown * n;
-
-          for (let x = 0; x < n; x += 1) {
-            const xLeft = left[x];
-            const xRight = right[x];
-            const i = row + x;
-
-            const neighbors =
-              current[rowUp + xLeft] +
-              current[rowUp + x] +
-              current[rowUp + xRight] +
-              current[row + xLeft] +
-              current[row + xRight] +
-              current[rowDown + xLeft] +
-              current[rowDown + x] +
-              current[rowDown + xRight];
-
-            const alive = current[i] === 1;
-            next[i] = alive ? (neighbors === 2 || neighbors === 3 ? 1 : 0) : neighbors === 3 ? 1 : 0;
-          }
-        }
-
-        const swap = sim.current;
-        sim.current = sim.next;
-        sim.next = swap;
-      }
-
-      function gridIndexToWorld(x, z) {
-        return {
-          x: (x + 0.5) * cellSize - boardHalfExtent,
-          z: (z + 0.5) * cellSize - boardHalfExtent,
-        };
-      }
-
-      function buildInstancedMesh() {
-        if (cellsMesh) {
-          scene.remove(cellsMesh);
-          cellsMesh.geometry.dispose();
-          cellsMesh.material.dispose();
-        }
-
-        const maxCount = sim.size * sim.size;
-        const geometry = new THREE.BoxGeometry(0.92, 0.92, 0.92);
-        const material = new THREE.MeshStandardMaterial({
-          color: 0x8ac7ff,
-          emissive: 0x2f72ff,
-          emissiveIntensity: 0.38,
-          roughness: 0.3,
-          metalness: 0.08,
-        });
-
-        cellsMesh = new THREE.InstancedMesh(geometry, material, maxCount);
-        cellsMesh.castShadow = true;
-        cellsMesh.receiveShadow = false;
-        cellsMesh.frustumCulled = false;
-        cellsMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        cellsMesh.count = maxCount;
-        scene.add(cellsMesh);
-      }
-
-      function updateCellMatrix(index, x, z, scale) {
-        const world = gridIndexToWorld(x, z);
-        tmpPos.set(world.x, baseY, world.z);
-        tmpScale.set(scale, scale, scale);
-        tmpMatrix.compose(tmpPos, tmpQuat, tmpScale);
-        cellsMesh.setMatrixAt(index, tmpMatrix);
-      }
-
-      function updateAllMatrices(force = false) {
-        let changed = force;
-        const n = sim.size;
-
-        for (let z = 0; z < n; z += 1) {
-          for (let x = 0; x < n; x += 1) {
-            const idx = indexAt(x, z);
-            const target = sim.current[idx] ? 1 : 0;
-            const nextScale = force ? target : THREE.MathUtils.damp(sim.scale[idx], target, 18, deltaClock);
-
-            if (force || Math.abs(nextScale - sim.scale[idx]) > 0.0006) {
-              sim.scale[idx] = nextScale;
-              updateCellMatrix(idx, x, z, nextScale);
-              changed = true;
+      function generateWorld() {
+        blocks.clear();
+        for (let x = -worldSize; x <= worldSize; x += 1) {
+          for (let z = -worldSize; z <= worldSize; z += 1) {
+            const top = terrainHeight(x, z);
+            for (let y = 0; y <= top; y += 1) {
+              const type = y === top ? 0 : 1;
+              addBlock(x, y, z, type);
             }
           }
         }
 
-        if (changed) {
-          cellsMesh.instanceMatrix.needsUpdate = true;
-        }
-      }
-
-      function initializeSimulation(size) {
-        sim.size = size;
-        sim.current = new Uint8Array(size * size);
-        sim.next = new Uint8Array(size * size);
-        sim.scale = new Float32Array(size * size);
-        sim.left = new Int16Array(size);
-        sim.right = new Int16Array(size);
-        sim.up = new Int16Array(size);
-        sim.down = new Int16Array(size);
-        boardHalfExtent = (size * cellSize) / 2;
-
-        buildWrapTables();
-        buildInstancedMesh();
-        randomizeGrid();
-      }
-
-      function worldToGrid(worldX, worldZ) {
-        const n = sim.size;
-        const x = Math.floor((worldX + boardHalfExtent) / cellSize);
-        const z = Math.floor((worldZ + boardHalfExtent) / cellSize);
-        if (x < 0 || x >= n || z < 0 || z >= n) return null;
-        return { x, z };
-      }
-
-      function toggleCellFromPointer(event) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-        raycaster.setFromCamera(pointer, camera);
-        if (!raycaster.ray.intersectPlane(pickPlane, pickPoint)) return;
-
-        const cell = worldToGrid(pickPoint.x, pickPoint.z);
-        if (!cell) return;
-
-        const idx = indexAt(cell.x, cell.z);
-        sim.current[idx] = sim.current[idx] ? 0 : 1;
-      }
-
-      renderer.domElement.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0 || state.running) return;
-        toggleCellFromPointer(event);
-      });
-
-      const guiState = {
-        startPause: () => {
-          state.running = !state.running;
-          startPauseController.name(state.running ? 'Pause' : 'Start');
-        },
-        reset: () => {
-          state.running = false;
-          startPauseController.name('Start');
-          clearGrid();
-        },
-        randomize: () => {
-          randomizeGrid();
-        },
-      };
-
-      const gui = new GUI({ title: "Conway's Life 3D" });
-      const startPauseController = gui.add(guiState, 'startPause').name('Start');
-      gui.add(guiState, 'reset').name('Reset');
-      gui.add(guiState, 'randomize').name('Randomize');
-      gui.add(state, 'speed', 1, 30, 1).name('Speed (steps/s)');
-      gui
-        .add(state, 'gridSize', 20, 140, 1)
-        .name('Grid Size')
-        .onFinishChange((value) => {
-          state.running = false;
-          startPauseController.name('Start');
-          initializeSimulation(value);
-        });
-
-      let accumulator = 0;
-      let deltaClock = 0;
-      let lastTime = performance.now();
-
-      function animate(now) {
-        requestAnimationFrame(animate);
-        deltaClock = Math.min((now - lastTime) / 1000, 0.1);
-        lastTime = now;
-
-        controls.update();
-
-        if (state.running) {
-          accumulator += deltaClock;
-          const stepInterval = 1 / Math.max(state.speed, 1);
-          while (accumulator >= stepInterval) {
-            updateLogicStep();
-            accumulator -= stepInterval;
+        for (let i = 0; i < 20; i += 1) {
+          const tx = Math.floor((Math.random() - 0.5) * worldSize * 1.8);
+          const tz = Math.floor((Math.random() - 0.5) * worldSize * 1.8);
+          const h = terrainHeight(tx, tz);
+          for (let y = h + 1; y < h + 5; y += 1) {
+            addBlock(tx, y, tz, 2);
           }
         }
+        rebuildMesh();
+      }
 
-        updateAllMatrices(false);
+      const move = { forward: false, backward: false, left: false, right: false, sprint: false };
+      const velocity = new THREE.Vector3();
+      const direction = new THREE.Vector3();
+      let canJump = false;
+      let selectedType = 0;
+
+      function createHotbar() {
+        hotbarEl.innerHTML = '';
+        blockCatalog.forEach((block, idx) => {
+          const slot = document.createElement('div');
+          slot.className = `slot ${idx === selectedType ? 'active' : ''}`;
+          slot.textContent = `${idx + 1} ${block.name}`;
+          slot.style.borderColor = idx === selectedType ? '#9ed0ff' : 'rgba(180, 200, 255, 0.38)';
+          slot.style.boxShadow = idx === selectedType ? '0 0 0 2px rgba(158, 208, 255, 0.2), inset 0 0 12px rgba(110, 190, 255, 0.2)' : 'none';
+          hotbarEl.appendChild(slot);
+        });
+      }
+
+      function setSelectedType(idx) {
+        selectedType = idx;
+        createHotbar();
+      }
+
+      function getNearbyBlocks(min, max) {
+        const out = [];
+        for (let x = Math.floor(min.x); x <= Math.floor(max.x); x += 1) {
+          for (let y = Math.floor(min.y); y <= Math.floor(max.y); y += 1) {
+            for (let z = Math.floor(min.z); z <= Math.floor(max.z); z += 1) {
+              if (getBlock(x, y, z) !== null) out.push({ x, y, z });
+            }
+          }
+        }
+        return out;
+      }
+
+      function resolveAxis(pos, delta, axis, halfW, height) {
+        pos[axis] += delta;
+        const min = new THREE.Vector3(pos.x - halfW, pos.y, pos.z - halfW);
+        const max = new THREE.Vector3(pos.x + halfW, pos.y + height, pos.z + halfW);
+        const near = getNearbyBlocks(min, max);
+
+        for (const b of near) {
+          const overlapX = Math.min(max.x, b.x + 1) - Math.max(min.x, b.x);
+          const overlapY = Math.min(max.y, b.y + 1) - Math.max(min.y, b.y);
+          const overlapZ = Math.min(max.z, b.z + 1) - Math.max(min.z, b.z);
+          if (overlapX > 0 && overlapY > 0 && overlapZ > 0) {
+            if (axis === 'x') {
+              pos.x += delta > 0 ? -overlapX : overlapX;
+              velocity.x = 0;
+            } else if (axis === 'y') {
+              pos.y += delta > 0 ? -overlapY : overlapY;
+              if (delta < 0) canJump = true;
+              velocity.y = 0;
+            } else {
+              pos.z += delta > 0 ? -overlapZ : overlapZ;
+              velocity.z = 0;
+            }
+          }
+        }
+      }
+
+      function tryBuildWall() {
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+        const base = controls.getObject().position.clone().addScaledVector(forward, 3);
+        const bx = Math.floor(base.x);
+        const by = Math.floor(base.y);
+        const bz = Math.floor(base.z);
+
+        for (let y = 0; y < 3; y += 1) {
+          for (let i = -1; i <= 1; i += 1) {
+            const x = Math.abs(forward.x) > Math.abs(forward.z) ? bx : bx + i;
+            const z = Math.abs(forward.x) > Math.abs(forward.z) ? bz + i : bz;
+            addBlock(x, by + y, z, selectedType);
+          }
+        }
+        rebuildMesh();
+      }
+
+      document.addEventListener('keydown', (event) => {
+        if (event.code === 'KeyW') move.forward = true;
+        if (event.code === 'KeyS') move.backward = true;
+        if (event.code === 'KeyA') move.left = true;
+        if (event.code === 'KeyD') move.right = true;
+        if (event.code === 'ShiftLeft') move.sprint = true;
+        if (event.code === 'Space' && canJump) {
+          velocity.y = 9.8;
+          canJump = false;
+        }
+
+        if (event.code === 'Digit1') setSelectedType(0);
+        if (event.code === 'Digit2') setSelectedType(1);
+        if (event.code === 'Digit3') setSelectedType(2);
+        if (event.code === 'KeyF') tryBuildWall();
+      });
+
+      document.addEventListener('keyup', (event) => {
+        if (event.code === 'KeyW') move.forward = false;
+        if (event.code === 'KeyS') move.backward = false;
+        if (event.code === 'KeyA') move.left = false;
+        if (event.code === 'KeyD') move.right = false;
+        if (event.code === 'ShiftLeft') move.sprint = false;
+      });
+
+      const raycaster = new THREE.Raycaster();
+
+      function interact(place) {
+        if (!controls.isLocked) return;
+        const origin = camera.getWorldPosition(new THREE.Vector3());
+        const dir = camera.getWorldDirection(new THREE.Vector3());
+        raycaster.set(origin, dir);
+        const hit = raycaster.intersectObject(blockMesh, false)[0];
+        if (!hit) return;
+
+        const normal = hit.face.normal.clone();
+        const p = hit.point.clone().addScaledVector(normal, place ? 0.5 : -0.5);
+        const x = Math.floor(p.x);
+        const y = Math.floor(p.y);
+        const z = Math.floor(p.z);
+
+        if (place) {
+          addBlock(x, y, z, selectedType);
+        } else {
+          removeBlock(x, y, z);
+        }
+        rebuildMesh();
+      }
+
+      document.addEventListener('mousedown', (event) => {
+        if (!controls.isLocked) return;
+        if (event.button === 0) interact(false);
+      });
+
+      document.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        if (controls.isLocked) interact(true);
+      });
+
+      createHotbar();
+      generateWorld();
+
+      const clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const dt = Math.min(clock.getDelta(), 0.05);
+        const player = controls.getObject();
+
+        velocity.x -= velocity.x * 10 * dt;
+        velocity.z -= velocity.z * 10 * dt;
+        velocity.y -= 30 * dt;
+
+        direction.set(0, 0, 0);
+        direction.z = Number(move.forward) - Number(move.backward);
+        direction.x = Number(move.right) - Number(move.left);
+        direction.normalize();
+
+        const speed = move.sprint ? 18 : 12;
+        if (move.forward || move.backward) velocity.z -= direction.z * speed * dt;
+        if (move.left || move.right) velocity.x -= direction.x * speed * dt;
+
+        const localMove = new THREE.Vector3(-velocity.x * dt, 0, -velocity.z * dt);
+        localMove.applyQuaternion(camera.quaternion);
+        localMove.y = 0;
+
+        canJump = false;
+        resolveAxis(player.position, localMove.x, 'x', 0.35, 1.7);
+        resolveAxis(player.position, velocity.y * dt, 'y', 0.35, 1.7);
+        resolveAxis(player.position, localMove.z, 'z', 0.35, 1.7);
+
+        if (player.position.y < 2) {
+          player.position.y = 2;
+          velocity.y = Math.max(velocity.y, 0);
+          canJump = true;
+        }
+
+        const fps = Math.round(1 / dt);
+        statsEl.textContent = `Blocks: ${blockMesh.count} | FPS: ${fps} | Pos: ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)} | ${blockCatalog[selectedType].name}`;
+
         renderer.render(scene, camera);
       }
 
-      function onResize() {
+      window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
-      }
+      });
 
-      window.addEventListener('resize', onResize);
-
-      initializeSimulation(state.gridSize);
-      animate(performance.now());
+      animate();
     </script>
   </body>
 </html>
